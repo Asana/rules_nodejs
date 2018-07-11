@@ -1,11 +1,13 @@
 import {fum} from 'fumlib';
+import hello from 'hello';
+import {thing} from 'some_global_var';
 
 import {name} from './bar';
 
-console.log(`Hello, ${name} in ${fum}`);
+console.log(`${hello}, ${name} in ${fum}`);
 
 // Test for sequences = false
-class A {
+export class A {
   a() {
     return document.a;
   }
@@ -13,4 +15,4 @@ class A {
 function inline_me() {
   return 'abc';
 }
-console.error(new A().a(), inline_me());
+console.error(new A().a(), inline_me(), thing);

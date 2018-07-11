@@ -21,10 +21,9 @@ load("//internal/common:check_bazel_version.bzl", _check_bazel_version = "check_
 load("//internal/node:node.bzl",
      _nodejs_binary = "nodejs_binary_macro",
      _nodejs_test = "nodejs_test_macro")
-load("//internal/node:node_repositories.bzl", _node_repositories = "node_repositories")
+load("//internal/node:node_repositories.bzl",_node_repositories = "node_repositories")
 load("//internal/jasmine_node_test:jasmine_node_test.bzl", _jasmine_node_test = "jasmine_node_test")
-load("//internal/npm_install:npm_install.bzl", _npm_install = "npm_install")
-load("//internal/yarn_install:yarn_install.bzl", _yarn_install = "yarn_install")
+load("//internal/npm_install:npm_install.bzl", _npm_install = "npm_install", _yarn_install = "yarn_install")
 load("//internal/rollup:rollup_bundle.bzl", _rollup_bundle = "rollup_bundle")
 load("//internal/npm_package:npm_package.bzl", _npm_package = "npm_package")
 
@@ -37,8 +36,9 @@ npm_install = _npm_install
 yarn_install = _yarn_install
 rollup_bundle = _rollup_bundle
 npm_package = _npm_package
+# ANY RULES ADDED HERE SHOULD BE DOCUMENTED, run yarn skydoc to verify
 
-def node_modules_filegroup(packages, **kwargs):
+def node_modules_filegroup(packages, patterns=[], **kwargs):
   native.filegroup(
     srcs = native.glob(["/".join([
         "node_modules",
@@ -49,6 +49,6 @@ def node_modules_filegroup(packages, **kwargs):
         "*.js",
         "*.json",
         "*.d.ts",
-    ]]),
+    ]] + patterns),
     **kwargs
   )

@@ -81,11 +81,6 @@ function resolveToModuleRoot(path) {
  * See https://github.com/bazelbuild/bazel/issues/3726
  */
 function loadRunfilesManifest(manifestPath) {
-  // If the manifest doesn't exist, we're not running on Windows, and don't need
-  // it.
-  if (!fs.existsSync(manifestPath)) {
-    return;
-  }
   const result = Object.create(null);
   const input = fs.readFileSync(manifestPath, {encoding: 'utf-8'});
   for (const line of input.split('\n')) {
@@ -95,7 +90,13 @@ function loadRunfilesManifest(manifestPath) {
   }
   return result;
 }
-const runfilesManifest = loadRunfilesManifest(process.env.RUNFILES_MANIFEST_FILE);
+const runfilesManifest =
+    // On Windows, Bazel sets RUNFILES_MANIFEST_ONLY=1.
+    // On every platform, Bazel also sets RUNFILES_MANIFEST_FILE, but on Linux
+    // and macOS it's faster to use the symlinks in RUNFILES_DIR rather than resolve
+    // through the indirection of the manifest file
+    process.env.RUNFILES_MANIFEST_ONLY === '1' &&
+    loadRunfilesManifest(process.env.RUNFILES_MANIFEST_FILE);
 
 function isFile(res) {
   try {
@@ -231,8 +232,15 @@ module.constructor._resolveFilename =
     resolveLocations.push(resolveRunfiles(
         'TEMPLATED_label_workspace_name', 'TEMPLATED_label_package', 'node_modules', request));
   }
+  var manifestLocation = resolveRunfiles('manifest');
   for (var location of resolveLocations) {
     try {
+      // Do not resolve the MANIFEST file in runfiles
+      // This can occur unintentially from a require('manifest') if there
+      // is a manifest.js file or manifest npm package to be resolved
+      if (runfilesManifest && location.toLowerCase() == manifestLocation.toLowerCase()) {
+        continue;
+      }
       return originalResolveFilename(location, parent);
     } catch (e) {
       failedResolutions.push(location);

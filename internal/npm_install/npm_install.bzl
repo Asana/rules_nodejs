@@ -12,13 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Rules to install NodeJS dependencies during WORKSPACE evaluation."""
+"""Install npm packages
 
-load("//internal/node:node_labels.bzl", "get_node_label", "get_npm_label")
+Rules to install NodeJS dependencies during WORKSPACE evaluation.
+This happens before the first build or test runs, allowing you to use Bazel
+as the package manager.
 
-def _npm_install_impl(repository_ctx):
-  """Core implementation of npm_install."""
+See discussion in the README.
+"""
 
+load("//internal/node:node_labels.bzl", "get_node_label", "get_npm_label", "get_yarn_label")
+load("//internal/common:os_name.bzl", "os_name")
+
+def _create_build_file(repository_ctx):
   repository_ctx.file("BUILD", """
 package(default_visibility = ["//visibility:public"])
 filegroup(
@@ -34,9 +40,43 @@ filegroup(
             # e.g. node_modules/puppeteer/.local-chromium/mac-536395/chrome-mac/Chromium.app/Contents/Versions/66.0.3347.0/Chromium Framework.framework/Chromium Framework
             "node_modules/**/.*/**"
         ],
-    ),
+    ) + glob(["node_modules/.bin/*"]),
 )
 """)
+
+def _add_data_dependencies(repository_ctx):
+  """Add data dependencies to the repository."""
+  for f in repository_ctx.attr.data:
+    to = []
+    if f.package:
+      to += [f.package]
+    to += [f.name]
+    repository_ctx.symlink(f, repository_ctx.path("/".join(to)))
+
+def _npm_install_impl(repository_ctx):
+  """Core implementation of npm_install."""
+
+  _create_build_file(repository_ctx)
+
+  is_windows = os_name(repository_ctx).find("windows") != -1
+  node = get_node_label(repository_ctx)
+  npm = get_npm_label(repository_ctx)
+
+  # The entry points for npm install for osx/linux and windows
+  if not is_windows:
+    repository_ctx.file("npm", content="""#!/bin/bash
+(cd "{root}"; "{npm}" install)
+""".format(
+    root = repository_ctx.path(""),
+    npm = repository_ctx.path(npm)),
+    executable = True)
+  else:
+    repository_ctx.file("npm.cmd", content="""@echo off
+cd "{root}" && "{npm}" install
+""".format(
+    root = repository_ctx.path(""),
+    node = repository_ctx.path(npm)),
+    executable = True)
 
   # Put our package descriptors in the right place.
   repository_ctx.symlink(
@@ -47,16 +87,11 @@ filegroup(
           repository_ctx.attr.package_lock_json,
           repository_ctx.path("package-lock.json"))
 
-  node = get_node_label(repository_ctx)
-  npm = get_npm_label(repository_ctx)
+  _add_data_dependencies(repository_ctx)
 
-  # This runs node, not npm directly, as the latter will
-  # use #!/usr/bin/node (see https://github.com/bazelbuild/rules_nodejs/issues/77)
   # To see the output, pass: quiet=False
-  # --scripts-prepend-node-path=true is added so that any child npm processes use the
-  # correct node binary (see https://github.com/bazelbuild/rules_nodejs/issues/151)
   result = repository_ctx.execute(
-    [repository_ctx.path(node), repository_ctx.path(npm), "install", "--scripts-prepend-node-path=true", repository_ctx.path("")])
+    [repository_ctx.path("npm.cmd" if is_windows else "npm")])
 
   if not repository_ctx.attr.package_lock_json:
     print("\n***********WARNING***********\n%s: npm_install will require a package_lock_json attribute in future versions\n*****************************" % repository_ctx.name)
@@ -86,6 +121,59 @@ npm_install = repository_rule(
             allow_files = True,
             single_file = True,
         ),
+        "data": attr.label_list(),
     },
     implementation = _npm_install_impl,
 )
+"""Runs npm install during workspace setup.
+"""
+
+def _yarn_install_impl(repository_ctx):
+  """Core implementation of yarn_install."""
+
+  _create_build_file(repository_ctx)
+
+  # Put our package descriptors in the right place.
+  repository_ctx.symlink(
+      repository_ctx.attr.package_json,
+      repository_ctx.path("package.json"))
+  if repository_ctx.attr.yarn_lock:
+      repository_ctx.symlink(
+          repository_ctx.attr.yarn_lock,
+          repository_ctx.path("yarn.lock"))
+
+  _add_data_dependencies(repository_ctx)
+
+  yarn = get_yarn_label(repository_ctx)
+
+  # A local cache is used as multiple yarn rules cannot run simultaneously using a shared
+  # cache and a shared cache is non-hermetic.
+  # To see the output, pass: quiet=False
+  result = repository_ctx.execute([
+    repository_ctx.path(yarn),
+    "--cache-folder",
+    repository_ctx.path("_yarn_cache"),
+    "--cwd",
+    repository_ctx.path("")])
+
+  if result.return_code:
+    fail("yarn_install failed: %s (%s)" % (result.stdout, result.stderr))
+
+yarn_install = repository_rule(
+    attrs = {
+        "package_json": attr.label(
+            allow_files = True,
+            mandatory = True,
+            single_file = True,
+        ),
+        "yarn_lock": attr.label(
+            allow_files = True,
+            mandatory = True,
+            single_file = True,
+        ),
+        "data": attr.label_list(),
+    },
+    implementation = _yarn_install_impl,
+)
+"""Runs yarn install during workspace setup.
+"""

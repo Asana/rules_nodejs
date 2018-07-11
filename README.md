@@ -5,12 +5,17 @@ Circle CI | Bazel CI
 :---: | :---:
 [![CircleCI](https://circleci.com/gh/bazelbuild/rules_nodejs.svg?style=svg)](https://circleci.com/gh/bazelbuild/rules_nodejs) | [![Build status](https://badge.buildkite.com/af1a592b39b11923ef0f523cbb223dd3dbd61629f8bc813c07.svg)](https://buildkite.com/bazel/nodejs-rules-nodejs-postsubmit)
 
-**This is an alpha-quality release. Breaking changes are likely.**
+**This is a beta-quality release. Breaking changes are likely.**
 
 The nodejs rules integrate NodeJS development toolchain and runtime with Bazel.
 
 This toolchain can be used to build applications that target a browser runtime,
 so this repo can be thought of as "JavaScript rules for Bazel" as well.
+
+## API Docs
+
+Generated documentation for using each rule is at:
+https://bazelbuild.github.io/rules_nodejs/
 
 ## Installation
 
@@ -23,16 +28,110 @@ containing:
 git_repository(
     name = "build_bazel_rules_nodejs",
     remote = "https://github.com/bazelbuild/rules_nodejs.git",
-    tag = "0.3.1", # check for the latest tag when you install
+    tag = "0.10.0", # check for the latest tag when you install
 )
 
 load("@build_bazel_rules_nodejs//:defs.bzl", "node_repositories")
+```
 
+Now you can choose from a few options to finish installation.
+
+To choose a version of Node.js:
+
+1. (Simplest) use the version of Node.js that comes with these rules by default
+1. Choose from one of the versions we support natively
+1. Tell Bazel where to download a specific version you require
+1. Check Node.js into your repository and don't download anything
+
+These are described in more detail in the following sections.
+
+### Simple usage
+
+Add this to your `WORKSPACE` file. It only tells Bazel how to find your
+`package.json` file. It will use default versions of Node.js and npm.
+
+```python
 # NOTE: this rule installs nodejs, npm, and yarn, but does NOT install
 # your npm dependencies into your node_modules folder.
 # You must still run the package manager to do this.
 node_repositories(package_json = ["//:package.json"])
 ```
+### Installation with a specific supported version of Node.js and Yarn
+
+You can choose a specific version of Node.js that's built into these rules.
+Currently these versions are:
+
+* 9.11.1
+* 8.11.1
+* 8.9.1
+
+You can also choose a specific version of Yarn.
+Currently these versions are:
+
+* 1.6.0
+* 1.5.1
+* 1.3.2
+
+Add to `WORKSPACE`:
+
+```python
+# NOTE: this rule installs nodejs, npm, and yarn, but does NOT install
+# your npm dependencies into your node_modules folder.
+# You must still run the package manager to do this.
+node_repositories(
+    package_json = ["//:package.json"],
+    node_version = "8.11.1",
+    yarn_version = "1.5.1",
+)
+```
+
+### Installation with a manually specified version of NodeJS and Yarn
+
+If you'd like to use a version of NodeJS and/or Yarn that are not currently supported here, you can manually
+specify those in your `WORKSPACE`:
+
+```python
+load("@build_bazel_rules_nodejs//:defs.bzl", "node_repositories")
+
+# NOTE: this rule does NOT install your npm dependencies into your node_modules folder.
+# You must still run the package manager to do this.
+node_repositories(
+  node_version = "8.10.0",
+  yarn_version = "1.5.1",
+  node_repositories = {
+    "8.10.0-darwin_amd64": ("node-v8.10.0-darwin-x64.tar.gz", "node-v8.10.0-darwin-x64", "7d77bd35bc781f02ba7383779da30bd529f21849b86f14d87e097497671b0271"),
+    "8.10.0-linux_amd64": ("node-v8.10.0-linux-x64.tar.xz", "node-v8.10.0-linux-x64", "92220638d661a43bd0fee2bf478cb283ead6524f231aabccf14c549ebc2bc338"),
+    "8.10.0-windows_amd64": ("node-v8.10.0-win-x64.zip", "node-v8.10.0-win-x64", "936ada36cb6f09a5565571e15eb8006e45c5a513529c19e21d070acf0e50321b"),
+  },
+  yarn_repositories = {
+    "1.5.1": ("yarn-v1.5.1.tar.gz", "yarn-v1.5.1", "cd31657232cf48d57fdbff55f38bfa058d2fb4950450bd34af72dac796af4de1"),
+  },
+  node_urls = ["https://nodejs.org/dist/v{version}/{filename}"],
+  yarn_urls = ["https://github.com/yarnpkg/yarn/releases/download/v{version}/{filename}"],
+  package_json = ["//:package.json"])
+```
+
+Specifying `node_urls` and `yarn_urls` is optional. If omitted, the default values will be used. You may also use a custom NodeJS version and the default Yarn version or vice-versa.
+
+### Installation with local vendored versions of NodeJS and Yarn
+
+Finally, you could check Node.js and Yarn into your repository, and not fetch
+them from the internet. This is what we do internally at Google.
+
+```python
+load("@build_bazel_rules_nodejs//:defs.bzl", "node_repositories")
+
+# NOTE: this rule does NOT install your npm dependencies into your node_modules folder.
+# You must still run the package manager to do this.
+node_repositories(
+  node_path = "path/to/node/base",
+  yarn_path = "path/to/yarn/base",
+  package_json = ["//:package.json"])
+```
+
+## Dependencies
+
+You have two options for managing your `node_modules` dependencies.
 
 ### Using self-managed dependencies
 
@@ -53,7 +152,7 @@ To use the Yarn package manager, which we recommend for its built-in
 verification command, you can run:
 
 ```sh
-$ bazel run @yarn//:yarn
+$ bazel run @nodejs//:yarn
 ```
 
 If you use npm instead, run:
@@ -67,16 +166,30 @@ $ bazel run @nodejs//:npm install
 ### Using Bazel-managed dependencies
 
 To have Bazel manage its own copy of `node_modules`, which is useful to avoid
-juggling multiple toolchains, you can add the following to your `WORKSPACE`
+juggling multiple toolchains, you can add one of the following to your `WORKSPACE`
 file:
+
+Using Yarn (preferred):
+
+```python
+load("@build_bazel_rules_nodejs//:defs.bzl", "yarn_install")
+
+yarn_install(
+    name = "foo",
+    package_json = "//:package.json",
+    yarn_lock = "//:yarn.lock",
+)
+```
+
+Using NPM:
 
 ```python
 load("@build_bazel_rules_nodejs//:defs.bzl", "npm_install")
 
 npm_install(
     name = "foo",
-    # This can also take package.json
-    package_json = "//:package-lock.json",
+    package_json = "//:package.json",
+    package_lock_json = "//:package-lock.json",
 )
 ```
 
@@ -94,7 +207,7 @@ nodejs_binary(
 ```
 
 With this approach, Bazel is responsible for making sure that `node_modules` is
-up to date with `package[-lock].json`.  This means Bazel will set it up when the
+up to date with `package[-lock].json` or `yarn.lock`.  This means Bazel will set it up when the
 repo is first cloned, and rebuild it whenever it changes.
 
 For Bazel to provide the strongest guarantees about reproducibility and the
@@ -106,6 +219,10 @@ juggling Bazel and other tooling, or sensitive to the additional network traffic
 this might incur, consider self-managing.
 
 ## Usage
+
+The complete API documentation is at https://bazelbuild.github.io/rules_nodejs/
+
+A few example rules contained in this repo:
 
 The `nodejs_binary` rule allows you to run an application by giving the entry point.
 The entry point can come from an external dependency installed by the package manager,
@@ -121,6 +238,9 @@ The `jasmine_node_test` rule allows you to write a test that executes in NodeJS.
 `npm_package` packages up a library to publish to npm.
 
 ### Running a program from npm
+
+The `nodejs_binary` rule lets you run a program with Node.js.
+See https://bazelbuild.github.io/rules_nodejs/node/node.html
 
 If you have installed the [rollup] package, you could write this rule:
 
@@ -172,11 +292,7 @@ See the `examples/program` directory in this repository.
 
 The `jasmine_node_test` rule can be used to run unit tests in NodeJS, using the Jasmine framework.
 Targets declared with this rule can be run with `bazel test`.
-
-Attributes:
-
-The `srcs` of a `jasmine_node_test` should include the test `.js` files.
-The `deps` should include the production `.js` sources, or other rules which produce `.js` files, such as TypeScript.
+See https://bazelbuild.github.io/rules_nodejs/jasmine_node_test/jasmine_node_test.html
 
 The `examples/program/index.spec.js` file illustrates this. Another usage is in https://github.com/angular/tsickle/blob/master/test/BUILD
 
@@ -206,26 +322,9 @@ Bazel supports this natively, using the following approach:
 
    For a more full-featured script, take a look at the [bazel_stamp_vars in Angular]
 
-1) A `genrule()` with `stamp=True` can read the result.
-   Bazel puts the output of the `bazel_stamp_vars.sh` in the magic location `bazel-out/volatile-status.txt`.
-   (Note, this doesn't require that you actually have a `bazel-out` folder in your project.)
-   We recommend adding this target to your `tools/BAZEL.build`:
+Ideally, `rollup_bundle` and `npm_package` should honor the `--stamp` argument to `bazel build`. However this is not currently possible, see https://github.com/bazelbuild/bazel/issues/1054
 
-    ```python
-    genrule(
-        name = "stamp_data",
-        outs = ["stamp_data.txt"],
-        cmd = "cat bazel-out/volatile-status.txt > $@",
-        stamp = True,
-        visibility = ["//:__subpackages__"],
-    )
-    ```
-
-1) Now you can pass this target to the `stamp_data` attribute of `rollup_bundle` or `npm_package`:
-
-    ```python
-    stamp_data = "//tools:stamp_data"
-    ```
+> WARNING: Bazel doesn't rebuild a target if only the result of the workspace_status_command has changed. That means changes to the version information may not be reflected if you re-build the package or bundle, and nothing in the package or bundle has changed.
 
 See https://www.kchodorow.com/blog/2017/03/27/stamping-your-builds/ for more background.
 
@@ -233,109 +332,17 @@ See https://www.kchodorow.com/blog/2017/03/27/stamping-your-builds/ for more bac
 
 ### Bundling/optimizing
 
-A `rollup_bundle` rule produces three bundle files:
-
-1. ES5 syntax, minified by uglify. This is the default output of the rule, meaning this file will be provided when this rule appears in the `deps[]` of another rule.
-
-```sh
-$ bazel build internal/e2e/rollup:bundle
-```
-
-2. ES5 syntax, un-minified.
-
-```sh
-$ bazel build internal/e2e/rollup:bundle.js
-```
-
-3. ES2015 syntax, un-minified.
-
-```
-$ bazel build internal/e2e/rollup:bundle.es6.js
-```
-
-Attributes:
-
-`srcs` are `.js` files to be included in the bundle
-
-`deps` are other rules which produce `.js` files, such as `ts_library`
-
-`entry_point` is the main file of the application that will be executed. Only
-sources reachable from the import graph of this file will be included in the
-bundle.
-
-`stamp_data` is a label of a file containing version info. See the Stamping section above.
+A `rollup_bundle` rule produces several bundle files.
+See https://bazelbuild.github.io/rules_nodejs/rollup/rollup_bundle.html
 
 > Note: we expect other bundling rules will follow later, such as Closure compiler and Webpack.
 
 ### Publishing to npm
 
 The `npm_package` rule is used to create a package to publish to external users who do not use Bazel.
+See https://bazelbuild.github.io/rules_nodejs/npm_package/npm_package.html
 
 > For those downstream dependencies that use Bazel, they can simply write BUILD files to consume your library.
-
-You can use a pair of `// BEGIN-INTERNAL ... // END-INTERNAL` comments to mark regions of files that should be elided during publishing.
-For example:
-
-```javascript
-function doThing() {
-    // BEGIN-INTERNAL
-    // This is a secret internal-only comment
-    doInternalOnlyThing();
-    // END-INTERNAL
-}
-```
-
-Attributes:
-
-`srcs` are files in your input tree
-
-`deps` are other rules which produce arbitrary files
-
-`replacements` is a dictionary of JS regexp to new string, in addition to the BEGIN/END-INTERNAL replacement.
-
-`stamp_data` is a label of a file containing version info. See the Stamping section above.
-
-Example:
-
-```python
-load("@build_bazel_rules_nodejs//:defs.bzl", "npm_package")
-
-npm_package(
-    name = "my_package",
-    srcs = ["package.json"],
-    deps = [":my_typescript_lib"],
-    replacements = {"//internal/": "//"},
-)
-```
-
-Usage:
-
-`npm_package` yields three labels. Build the package directory using the default label:
-
-```sh
-$ bazel build :my_package
-Target //:my_package up-to-date:
-  bazel-out/fastbuild/bin/my_package
-$ ls -R bazel-out/fastbuild/bin/my_package
-```
-
-Dry-run of publishing to npm, calling `npm pack` (it builds the package first if needed):
-
-```sh
-$ bazel run :my_package.pack
-INFO: Running command line: bazel-out/fastbuild/bin/my_package.pack
-my-package-name-1.2.3.tgz
-$ tar -tzf my-package-name-1.2.3.tgz
-```
-
-Actually publish the package with `npm publish` (also builds first):
-
-```sh
-# Check login credentials
-$ bazel run @nodejs//:npm who
-# Publishes the package
-$ bazel run :my_package.publish
-```
 
 # Design
 
@@ -357,3 +364,16 @@ References:
 - yarn: https://yarnpkg.com/lang/en/docs/yarn-lock/
 
 Note that https://github.com/bazelbuild/rules_nodejs/issues/1 will take the guarantee further: by using the lockfile as an input to Bazel, the nodejs rules can verify the integrity of the dependencies. This would make it impossible for a build to be non-reproducible, so long as you have the same lockfile.
+
+# For Developers
+
+## Releasing
+
+Start from a clean checkout at master/HEAD.
+Check if there are any breaking changes since the last tag - if so, this will be a minor, if not it's a patch.
+(This may not sound like semver, but since our major version is a zero, the rule is that minors are breaking changes and patches are new features.)
+
+1. Re-generate the API docs: `yarn skydoc`
+1. `git commit -a -m 'Update docs for release'`
+1. Write some brief release notes (manual for now): `git tag -a 0.x.y`
+1. `git push && git push --tags`

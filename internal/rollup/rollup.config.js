@@ -3,6 +3,8 @@
 
 const rollup = require('rollup');
 const nodeResolve = require('rollup-plugin-node-resolve');
+const sourcemaps = require('rollup-plugin-sourcemaps');
+const isBuiltinModule = require('is-builtin-module');
 const path = require('path');
 const fs = require('fs');
 
@@ -10,32 +12,46 @@ const DEBUG = false;
 
 const moduleMappings = TMPL_module_mappings;
 const workspaceName = 'TMPL_workspace_name';
-const rootDirs = TMPL_rootDirs;
+const rootDir = 'TMPL_rootDir';
 const banner_file = TMPL_banner_file;
 const stamp_data = TMPL_stamp_data;
 
 if (DEBUG)
   console.error(`
 Rollup: running with
-  rootDirs: ${rootDirs}
+  rootDir: ${rootDir}
   moduleMappings: ${JSON.stringify(moduleMappings)}
+  cwd: ${process.cwd()}
 `);
 
-// This resolver mimics the TypeScript `rootDirs` feature, which lets us pretend
-// that multiple roots are logically merged into a single tree.
-function resolveBazel(importee, importer, baseDir = process.cwd(), resolve = require.resolve) {
-  function resolveInRootDirs(importee) {
-    for (var i = 0; i < rootDirs.length; i++) {
-      var root = rootDirs[i];
-      var candidate = path.join(baseDir, root, importee);
-      if (DEBUG) console.error('Rollup: try to resolve at', candidate);
-      try {
-        var result = resolve(candidate);
-        return result;
-      } catch (e) {
-        continue;
-      }
+function fileExists(filePath) {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch (e) {
+    return false;
+  }
+}
+
+// This resolver mimics the TypeScript Path Mapping feature, which lets us resolve
+// modules based on a mapping of short names to paths.
+function resolveBazel(importee, importer, baseDir = process.cwd(), resolve = require.resolve, root = rootDir) {
+  function resolveInRootDir(importee) {
+    var candidate = path.join(baseDir, root, importee);
+    if (DEBUG) console.error(`Rollup: try to resolve '${importee}' at '${candidate}'`);
+    try {
+      var result = resolve(candidate);
+      return result;
+    } catch (e) {
+      return undefined;
     }
+  }
+
+  if (DEBUG) console.error(`Rollup: resolving '${importee}' from ${importer}`);
+
+  // If import is fully qualified then resolve it directly
+  if (fileExists(importee)) {
+    if (DEBUG) console.error(`Rollup: resolved fully qualified '${importee}'`);
+    return importee;
   }
 
   // process.cwd() is the execroot and ends up looking something like
@@ -50,18 +66,15 @@ function resolveBazel(importee, importer, baseDir = process.cwd(), resolve = req
     // relative import
     if (importer) {
       let importerRootRelative = path.dirname(importer);
-      for (var i = 0; i < rootDirs.length; i++) {
-        var root = rootDirs[i];
-        const relative = path.relative(path.join(baseDir, root), importerRootRelative);
-        if (!relative.startsWith('.')) {
-          importerRootRelative = relative;
-        }
+      const relative = path.relative(path.join(baseDir, root), importerRootRelative);
+      if (!relative.startsWith('.')) {
+        importerRootRelative = relative;
       }
       resolved = path.join(importerRootRelative, importee);
     } else {
       throw new Error('cannot resolve relative paths without an importer');
     }
-    if (resolved) resolved = resolveInRootDirs(resolved);
+    if (resolved) resolved = resolveInRootDir(resolved);
   }
 
   if (!resolved) {
@@ -70,9 +83,13 @@ function resolveBazel(importee, importer, baseDir = process.cwd(), resolve = req
     for (const k in moduleMappings) {
       if (importee == k || importee.startsWith(k + path.sep)) {
         // replace the root module name on a mappings match
-        var v = moduleMappings[k];
-        importee = path.join(v, importee.slice(k.length + 1));
-        resolved = resolveInRootDirs(importee);
+        // note that the module_root attribute is intended to be used for type-checking
+        // so it uses eg. "index.d.ts". At runtime, we have only index.js, so we strip the
+        // .d.ts suffix and let node require.resolve do its thing.
+        var v = moduleMappings[k].replace(/\.d\.ts$/, '');
+        const mappedImportee = path.join(v, importee.slice(k.length + 1));
+        if (DEBUG) console.error(`Rollup: module mapped '${importee}' to '${mappedImportee}'`);
+        resolved = resolveInRootDir(mappedImportee);
         if (resolved) break;
       }
     }
@@ -81,8 +98,11 @@ function resolveBazel(importee, importer, baseDir = process.cwd(), resolve = req
   if (!resolved) {
     // workspace import
     const userWorkspacePath = path.relative(workspaceName, importee);
-    resolved = resolveInRootDirs(userWorkspacePath.startsWith('..') ? importee : userWorkspacePath);
+    resolved = resolveInRootDir(userWorkspacePath.startsWith('..') ? importee : userWorkspacePath);
   }
+
+  if (DEBUG && !resolved)
+    console.error(`Rollup: allowing rollup to resolve '${importee}' with node module resolution`);
 
   return resolved;
 }
@@ -102,12 +122,34 @@ if (banner_file) {
   }
 }
 
+function notResolved(importee, importer) {
+  if (isBuiltinModule(importee)) {
+    return null;
+  }
+  throw new Error(`Could not resolve import '${importee}' from '${importer}'`);
+}
+
 module.exports = {
   resolveBazel,
   banner,
-  output: {format: 'iife'},
+  onwarn: (warning) => {
+    // Always fail on warnings, assuming we don't know which are harmless.
+    // We can add exclusions here based on warning.code, if we discover some
+    // types of warning should always be ignored under bazel.
+    throw new Error(warning.message);
+  },
+  output: {
+    format: 'TMPL_output_format',
+    name: 'TMPL_global_name',
+  },
   plugins: [TMPL_additional_plugins].concat([
     {resolveId: resolveBazel},
-    nodeResolve({jsnext: true, module: true}),
+    nodeResolve({
+      jsnext: true,
+      module: true,
+      customResolveOptions: {moduleDirectory: 'TMPL_node_modules_path'}
+    }),
+    {resolveId: notResolved},
+    sourcemaps(),
   ])
 }
