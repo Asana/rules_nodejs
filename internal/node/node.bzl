@@ -150,7 +150,6 @@ _NODEJS_EXECUTABLE_ATTRS = {
     "data": attr.label_list(
         doc = """Runtime dependencies which may be loaded during execution.""",
         allow_files = True,
-        cfg = "data",
         aspects=[sources_aspect, module_mappings_runtime_aspect]),
     "templated_args": attr.string_list(
         doc = """Arguments which are passed to every execution of the program.

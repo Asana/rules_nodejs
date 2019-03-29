@@ -37,6 +37,6 @@ mock_typescript_lib = rule(
   implementation = _mock_typescript_lib,
   attrs = {
     "srcs": attr.label_list(allow_files = True),
-    "data": attr.label_list(allow_files = True, cfg = "data"),
+    "data": attr.label_list(allow_files = True),
   }
 )
