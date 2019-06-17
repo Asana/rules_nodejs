@@ -113,13 +113,11 @@ cd "{root}" && "{npm}" install
 npm_install = repository_rule(
     attrs = {
         "package_json": attr.label(
-            allow_files = True,
             mandatory = True,
-            single_file = True,
+            allow_single_file = True,
         ),
         "package_lock_json": attr.label(
-            allow_files = True,
-            single_file = True,
+            allow_single_file = True,
         ),
         "data": attr.label_list(),
     },
@@ -162,14 +160,12 @@ def _yarn_install_impl(repository_ctx):
 yarn_install = repository_rule(
     attrs = {
         "package_json": attr.label(
-            allow_files = True,
             mandatory = True,
-            single_file = True,
+            allow_single_file = True,
         ),
         "yarn_lock": attr.label(
-            allow_files = True,
             mandatory = True,
-            single_file = True,
+            allow_single_file = True,
         ),
         "data": attr.label_list(),
     },
